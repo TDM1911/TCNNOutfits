@@ -31,6 +31,18 @@ namespace TCNNOutfits.Game
             return result;
         }
 
+        // Overworld characters compose separately (CharacterHandler_Spine + SkeletonAnimation).
+        // Without this, a skin built after they composed leaves the chibi invisible until
+        // something re-composes it (e.g. unequip/equip).
+        public void RefreshLiveOverworld()
+        {
+            foreach (var h in UnityEngine.Object.FindObjectsOfType<CharacterHandler_Spine>())
+            {
+                try { h.RefreshSkin(); }
+                catch (Exception e) { _log.LogWarning("RefreshSkin failed on " + h.name + ": " + e.Message); }
+            }
+        }
+
         public void RefreshLivePortraits()
         {
             foreach (var p in UnityEngine.Object.FindObjectsOfType<CharacterSprite_Spine>())

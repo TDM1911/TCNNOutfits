@@ -270,7 +270,11 @@ namespace TCNNOutfits.Core
             string newSkinName = "tcnn/" + rec.Id;
             clone.Name = !string.IsNullOrEmpty(rec.Options?.Title) ? rec.Options.Title : baseItem.Name + "_" + rec.Id;
             if (!string.IsNullOrEmpty(rec.Options?.Description)) clone.Description = rec.Options.Description;
+            // Both surfaces are set here, not after the skin builds: a save can clone this
+            // template before a skeleton is even available, and the clone keeps whatever the
+            // template had at that instant.
             clone.DialogueSpineSkins = new List<string> { newSkinName };
+            clone.OverworldSpineSkins = new List<string> { newSkinName };
 
             var icon = LoadIcon(rec.Options?.Icon, AssetFolderFor(rec));
             if (icon != null) clone.DisplaySprite = icon;
@@ -311,13 +315,6 @@ namespace TCNNOutfits.Core
 
             if (built == 0) return false;
 
-            // point the item at whichever surfaces actually have the skin
-            var item = GetCreated(rec.Id);
-            if (item != null)
-            {
-                if (rec.PortraitBuilt) item.DialogueSpineSkins = new List<string> { newSkinName };
-                if (rec.OverworldBuilt) item.OverworldSpineSkins = new List<string> { newSkinName };
-            }
             _log.LogInfo($"Skin '{newSkinName}' ready on {built} skeleton(s) (portrait={rec.PortraitBuilt}, overworld={rec.OverworldBuilt}).");
             RefreshLive();
             return true;
@@ -353,7 +350,11 @@ namespace TCNNOutfits.Core
             return true;
         }
 
-        private void RefreshLive() => _game?.RefreshLivePortraits();
+        private void RefreshLive()
+        {
+            _game?.RefreshLivePortraits();
+            _game?.RefreshLiveOverworld();
+        }
 
         public List<KeyValuePair<string, List<string>>> QuerySkins(string filter = null)
         {
