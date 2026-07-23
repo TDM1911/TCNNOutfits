@@ -1,0 +1,75 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!-- Optional local override, not committed. Create GameDir.props next to this file:
+       <Project><PropertyGroup>
+         <GameDir>C:\Path\To\Third Crisis Neon Nights</GameDir>
+       </PropertyGroup></Project>
+       ...or pass it on the command line: dotnet build -p:GameDir="C:\Path\To\Game" -->
+  <Import Project="GameDir.props" Condition="Exists('GameDir.props')" />
+
+  <PropertyGroup>
+    <TargetFramework>net472</TargetFramework>
+    <AssemblyName>TCNNOutfits</AssemblyName>
+    <RootNamespace>TCNNOutfits</RootNamespace>
+    <LangVersion>latest</LangVersion>
+    <AppendTargetFrameworkToOutputPath>false</AppendTargetFrameworkToOutputPath>
+    <GenerateAssemblyInfo>false</GenerateAssemblyInfo>
+    <Deterministic>true</Deterministic>
+    <NoWarn>MSB3277;CS0618</NoWarn>
+  </PropertyGroup>
+
+  <PropertyGroup>
+    <ManagedDir>$(GameDir)\Third Crisis Neon Nights_Data\Managed</ManagedDir>
+    <BepInExCore>$(GameDir)\BepInEx\core</BepInExCore>
+    <LoaderDir Condition="'$(LoaderDir)' == ''">$(GameDir)\BepInEx\plugins</LoaderDir>
+  </PropertyGroup>
+
+  <Target Name="ValidateGameDir" BeforeTargets="BeforeBuild">
+    <Error Condition="'$(GameDir)' == ''"
+           Text="GameDir is not set. Create GameDir.props next to the .csproj, or build with -p:GameDir=&quot;C:\Path\To\Third Crisis Neon Nights&quot;." />
+    <Error Condition="!Exists('$(ManagedDir)')"
+           Text="Managed folder not found at '$(ManagedDir)'. Check GameDir points at the folder containing the game .exe." />
+    <Error Condition="!Exists('$(LoaderDir)\TCModLoader.dll')"
+           Text="TCModLoader.dll not found at '$(LoaderDir)'. Install TCModLoader (BepInEx/plugins) or set -p:LoaderDir=..." />
+  </Target>
+
+  <ItemGroup>
+    <Reference Include="TCModLoader">
+      <HintPath>$(LoaderDir)\TCModLoader.dll</HintPath><Private>false</Private>
+    </Reference>
+    <Reference Include="BepInEx">
+      <HintPath>$(BepInExCore)\BepInEx.dll</HintPath><Private>false</Private>
+    </Reference>
+  </ItemGroup>
+
+  <ItemGroup>
+    <Reference Include="Assembly-CSharp">
+      <HintPath>$(ManagedDir)\Assembly-CSharp.dll</HintPath><Private>false</Private>
+    </Reference>
+    <Reference Include="ANToolkit.Utility">
+      <HintPath>$(ManagedDir)\ANToolkit.Utility.dll</HintPath><Private>false</Private>
+    </Reference>
+    <Reference Include="spine-unity">
+      <HintPath>$(ManagedDir)\spine-unity.dll</HintPath><Private>false</Private>
+    </Reference>
+    <Reference Include="spine-csharp">
+      <HintPath>$(ManagedDir)\spine-csharp.dll</HintPath><Private>false</Private>
+    </Reference>
+    <Reference Include="Newtonsoft.Json">
+      <HintPath>$(ManagedDir)\Newtonsoft.Json.dll</HintPath><Private>false</Private>
+    </Reference>
+    <Reference Include="UnityEngine">
+      <HintPath>$(ManagedDir)\UnityEngine.dll</HintPath><Private>false</Private>
+    </Reference>
+    <Reference Include="UnityEngine.CoreModule">
+      <HintPath>$(ManagedDir)\UnityEngine.CoreModule.dll</HintPath><Private>false</Private>
+    </Reference>
+    <Reference Include="UnityEngine.ImageConversionModule">
+      <HintPath>$(ManagedDir)\UnityEngine.ImageConversionModule.dll</HintPath><Private>false</Private>
+    </Reference>
+    <Reference Include="UnityEngine.UI">
+      <HintPath>$(ManagedDir)\UnityEngine.UI.dll</HintPath><Private>false</Private>
+    </Reference>
+  </ItemGroup>
+
+</Project>

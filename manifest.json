@@ -1,0 +1,8 @@
+{
+  "Name": "TCNN Outfits",
+  "Author": "TCNN Modding",
+  "Version": "0.4.0",
+  "Url": "",
+  "UniqueIdentifier": "tcnn.outfits",
+  "PathToDLL": "TCNNOutfits.dll"
+}
