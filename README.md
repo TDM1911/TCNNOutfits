@@ -30,10 +30,22 @@ Launch the game, open a dialogue so a character is on screen, then in the consol
 
 ```
 outfit.skins coat                     → find the skin you want, e.g. outfits/default/coat
-outfit.export outfits/default/coat    → writes the atlas page + mapping.json
+outfit.export outfits/default/coat    → exports every surface that uses it
 ```
 
-Repaint the exported PNG. Keep the **same size and layout** — only change pixels.
+You get one folder per outfit, covering all surfaces:
+
+```
+exports/outfits_default_coat/
+├── PortraitZoey.png                          ← portrait art
+├── Zoey_overworld_18.png                     ← overworld/chibi art
+├── icon.png                                  ← inventory icon
+├── mapping.PortraitZoey_SkeletonData.json    ← region info (reference only)
+└── mapping.Zoey_overworld_SkeletonData.json
+```
+
+Repaint the PNGs. Keep the **same size and layout** — only change pixels. Page file names must
+stay as exported; that's how each skeleton finds its own art.
 
 ### 2. Lay out your mod
 
@@ -42,8 +54,9 @@ MyOutfitMod/
 ├── MyOutfitMod.dll
 ├── manifest.json
 └── assets/my_coat/
-    ├── PortraitZoey.png    ← your repainted page (named after the page it replaces)
-    └── icon.png            ← inventory icon (optional)
+    ├── PortraitZoey.png        ← portrait (optional)
+    ├── Zoey_overworld_18.png   ← overworld/chibi (optional)
+    └── icon.png                ← inventory icon (optional)
 ```
 
 `manifest.json`:
@@ -110,6 +123,10 @@ public class MyOutfitMod : ITCMod
 That's it. `Create` registers the outfit as a real inventory item; **your** mod decides when the
 player receives it (`GiveToPlayer`, a shop, a quest reward, …).
 
+One `Create` call covers **portrait, overworld and icon** — pages are matched by file name, so each
+skeleton picks up only the page it uses. Supply just the pages you want to change; anything you
+omit keeps the original art.
+
 > **Register on every launch.** Saves store items by name and rebuild them from the registry, so
 > if your mod doesn't register at load, an item in an existing save can't be resolved. Calling
 > `Create` from `WhenReady` (as above) handles this — it's safe to call repeatedly.
@@ -138,7 +155,7 @@ Arguments are separated by **commas**, not spaces.
 | Command | Purpose |
 |---|---|
 | `outfit.skins [filter]` | List skins on the visible character |
-| `outfit.export <skin>` | Export a skin's atlas page(s) + `mapping.json` |
+| `outfit.export <skin>` | Export a skin's art for every surface + mapping files |
 | `outfit.import <skin>` | Reapply edited page art to an existing skin |
 | `outfit.create <baseSkin>, <id> [, <assetFolder>]` | Create an outfit without writing a mod |
 | `outfit.created` | List registered outfits |

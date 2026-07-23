@@ -12,9 +12,8 @@ namespace TCNNOutfits.Spine
         private readonly ManualLogSource _log;
         public SkinExporter(ManualLogSource log) { _log = log; }
 
-        public string Export(Skeleton skeleton, string skinName, string outRoot, string skeletonName)
+        public string Export(SkeletonData data, string skinName, string outRoot, string skeletonName)
         {
-            var data = skeleton.Data;
             var skin = data.FindSkin(skinName);
             if (skin == null) { _log.LogWarning($"Export: skin '{skinName}' not found on '{skeletonName}'."); return null; }
 
@@ -46,7 +45,7 @@ namespace TCNNOutfits.Spine
 
             if (regions.Count == 0) { _log.LogWarning($"Export: skin '{skinName}' had no texture regions."); return null; }
 
-            string dir = Path.Combine(outRoot, Sanitize(skeletonName), Sanitize(skinName));
+            string dir = Path.Combine(outRoot, Sanitize(skinName));
             Directory.CreateDirectory(dir);
 
             int pagesWritten = 0;
@@ -70,10 +69,32 @@ namespace TCNNOutfits.Spine
                 pages = new List<string>(pages.Keys),
                 regions = regions,
             };
-            File.WriteAllText(Path.Combine(dir, "mapping.json"), JsonConvert.SerializeObject(mapping, Formatting.Indented));
+            File.WriteAllText(Path.Combine(dir, $"mapping.{Sanitize(skeletonName)}.json"), JsonConvert.SerializeObject(mapping, Formatting.Indented));
 
             _log.LogInfo($"Exported '{skinName}': {pagesWritten} page(s), {regions.Count} region(s) -> {dir}");
             return dir;
+        }
+
+        public bool ExportSprite(Sprite sprite, string dir, string fileName)
+        {
+            if (sprite == null || sprite.texture == null) return false;
+            try
+            {
+                var readable = Readback(sprite.texture);
+                var r = sprite.textureRect;                 // sprite may be a sub-rect of an atlas
+                int w = Mathf.Max(1, (int)r.width), h = Mathf.Max(1, (int)r.height);
+
+                var outTex = new Texture2D(w, h, TextureFormat.RGBA32, false);
+                outTex.SetPixels(readable.GetPixels((int)r.x, (int)r.y, w, h));
+                outTex.Apply(false, false);
+
+                File.WriteAllBytes(Path.Combine(dir, fileName), outTex.EncodeToPNG());
+                Object.Destroy(readable);
+                Object.Destroy(outTex);
+                _log.LogInfo($"Exported sprite -> {fileName} ({w}x{h})");
+                return true;
+            }
+            catch (System.Exception e) { _log.LogError("Sprite export failed: " + e.Message); return false; }
         }
 
         private static Texture2D Readback(Texture2D src)

@@ -167,6 +167,9 @@ namespace TCNNOutfits.Core
 
         public IEnumerable<string> ActiveIds => _active.ToList();
 
+        private string PortraitSkeletonName => Asuna.CharManagement.Character.Player?.SpineSkeleton?.name;
+        private string OverworldSkeletonName => Asuna.CharManagement.Character.Player?.OverworldSpineSkeleton?.name;
+
         private List<KeyValuePair<string, SkeletonData>> GetSkeletonSources()
         {
             var list = new List<KeyValuePair<string, SkeletonData>>();
@@ -199,6 +202,7 @@ namespace TCNNOutfits.Core
             public string BaseSkin, Id, AssetFolder;
             public OutfitOptions Options;
             public bool ItemDone, SkinDone;
+            public bool PortraitBuilt, OverworldBuilt;
             public bool Complete => ItemDone && SkinDone;
         }
 
@@ -235,6 +239,19 @@ namespace TCNNOutfits.Core
         {
             if (string.IsNullOrEmpty(rec.AssetFolder)) return _baseDir;
             return Path.IsPathRooted(rec.AssetFolder) ? rec.AssetFolder : Path.Combine(_baseDir, rec.AssetFolder);
+        }
+
+        // Also dump the inventory icon of the item that uses this skin, so it can be reskinned too.
+        private void ExportItemIcon(string skinName, string dir)
+        {
+            foreach (var it in Asuna.Items.Item.All.Values)
+            {
+                var eq = it as Asuna.Items.Equipment;
+                if (eq?.DialogueSpineSkins == null || !eq.DialogueSpineSkins.Contains(skinName)) continue;
+                if (eq.DisplaySprite != null) _exporter.ExportSprite(eq.DisplaySprite, dir, "icon.png");
+                else _log.LogInfo($"Item '{eq.Name}' has no DisplaySprite to export.");
+                return;
+            }
         }
 
         private bool BuildItem(PendingOutfit rec)
@@ -277,6 +294,7 @@ namespace TCNNOutfits.Core
             if (sources.Count == 0) return false;
 
             string newSkinName = "tcnn/" + rec.Id;
+            int built = 0;
             foreach (var kv in sources)
             {
                 var data = kv.Value;
@@ -284,14 +302,25 @@ namespace TCNNOutfits.Core
 
                 string folder = ResolveAssetFolder(rec.AssetFolder, kv.Key, rec.BaseSkin);
                 var pages = _importer.LoadPagesForSkin(data, rec.BaseSkin, folder);
-                if (_resolver.BuildDerivedSkin(data, rec.BaseSkin, newSkinName, pages, null) > 0)
-                {
-                    _log.LogInfo($"Skin '{newSkinName}' ready.");
-                    RefreshLive();
-                    return true;
-                }
+                if (_resolver.BuildDerivedSkin(data, rec.BaseSkin, newSkinName, pages, null) <= 0) continue;
+
+                built++;
+                if (kv.Key == PortraitSkeletonName) rec.PortraitBuilt = true;
+                if (kv.Key == OverworldSkeletonName) rec.OverworldBuilt = true;
             }
-            return false;
+
+            if (built == 0) return false;
+
+            // point the item at whichever surfaces actually have the skin
+            var item = GetCreated(rec.Id);
+            if (item != null)
+            {
+                if (rec.PortraitBuilt) item.DialogueSpineSkins = new List<string> { newSkinName };
+                if (rec.OverworldBuilt) item.OverworldSpineSkins = new List<string> { newSkinName };
+            }
+            _log.LogInfo($"Skin '{newSkinName}' ready on {built} skeleton(s) (portrait={rec.PortraitBuilt}, overworld={rec.OverworldBuilt}).");
+            RefreshLive();
+            return true;
         }
 
 
@@ -349,18 +378,21 @@ namespace TCNNOutfits.Core
 
         public string ExportSkin(string skinName)
         {
-            var lives = _game?.GetLiveGraphics();
-            if (lives == null || lives.Count == 0)
+            var lives = GetSkeletonSources();
+            if (lives.Count == 0)
             {
-                _log.LogWarning("No visible character to export from. Open a dialogue and try again.");
+                _log.LogWarning("No skeleton available to export from (is a save loaded?).");
                 return null;
             }
             string outRoot = Path.Combine(_baseDir, "exports");
+            string lastDir = null;
             foreach (var kv in lives)
             {
-                if (kv.Value.Skeleton.Data.FindSkin(skinName) != null)
-                    return _exporter.Export(kv.Value.Skeleton, skinName, outRoot, kv.Key);
+                if (kv.Value.FindSkin(skinName) == null) continue;
+                var dir = _exporter.Export(kv.Value, skinName, outRoot, kv.Key);
+                if (dir != null) lastDir = dir;
             }
+            if (lastDir != null) { ExportItemIcon(skinName, lastDir); return lastDir; }
             _log.LogWarning($"Skin '{skinName}' not found on any visible character — check the name with outfit.skins.");
             return null;
         }
@@ -383,7 +415,7 @@ namespace TCNNOutfits.Core
 
         private string ResolveAssetFolder(string assetFolder, string skeletonName, string skinName)
             => string.IsNullOrEmpty(assetFolder)
-                ? Path.Combine(_baseDir, "exports", SkinExporter.Sanitize(skeletonName), SkinExporter.Sanitize(skinName))
+                ? Path.Combine(_baseDir, "exports", SkinExporter.Sanitize(skinName))
                 : (Path.IsPathRooted(assetFolder) ? assetFolder : Path.Combine(_baseDir, assetFolder));
 
         public int ImportSkin(string skinName, string assetFolder = null)
