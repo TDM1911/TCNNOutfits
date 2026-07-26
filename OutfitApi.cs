@@ -54,5 +54,20 @@ namespace TCNNOutfits
         // Convenience for consumers that just want it in the bag.
         public static bool GiveToPlayer(string id, bool equip = false)
             => OutfitFramework.Instance?.GiveToPlayer(id, equip) ?? false;
+
+        // --- custom-MESH outfits (packages exported by the TCNN Mesh Editor) ---
+
+        // Register a mesh-outfit package folder (single.json + page + hide.json + outfit.json). The
+        // outfit's id comes from outfit.json. Call from your mod, e.g.:
+        //   OutfitApi.RegisterMeshOutfit(Path.Combine(manifest.ModPath, "assets", "my_outfit"));
+        public static void RegisterMeshOutfit(string packageFolder)
+            => OutfitFramework.Instance?.RegisterMeshOutfit(packageFolder);
+
+        // Wear a registered mesh outfit by id (registers the item, builds it, gives + equips).
+        public static bool WearMeshOutfit(string id)
+            => OutfitFramework.Instance?.WearMeshOutfit(id) ?? false;
+
+        public static IEnumerable<string> MeshOutfits
+            => OutfitFramework.Instance?.MeshOutfitIds ?? new List<string>();
     }
 }

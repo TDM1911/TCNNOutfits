@@ -135,6 +135,39 @@ namespace TCNNOutfits.Spine
             return n;
         }
 
+        // One AtlasRegion covering a whole single page (our packed suit atlas). RegionUVs are then
+        // page-normalized 0..1 and map directly to it.
+        public AtlasRegion MakeFullPageRegion(Material template, Texture tex, int w, int h)
+        {
+            var mat = new Material(template) { mainTexture = tex };
+            var page = new AtlasPage { name = "racer", width = w, height = h, pma = true, rendererObject = mat };
+            return new AtlasRegion
+            {
+                page = page, name = "racer", index = -1, rotate = false, degrees = 0,
+                u = 0f, v = 0f, u2 = 1f, v2 = 1f,
+                width = w, height = h, offsetX = 0, offsetY = 0, originalWidth = w, originalHeight = h
+            };
+        }
+
+        // Build a mesh attachment: reuse src's structure (hull/edges), swap in our single-page region,
+        // explicit page UVs, and the dilated weighted geometry.
+        public MeshAttachment MakeMesh(Attachment src, AtlasRegion region, float[] regionUVs,
+                                       int[] bones, float[] verts, int worldVerticesLength, int[] triangles)
+        {
+            if (!(src.Copy() is MeshAttachment m)) return null;
+            m.Region = region;
+            m.RegionUVs = regionUVs;
+            if (triangles != null) m.Triangles = triangles;
+            m.Bones = bones;
+            m.Vertices = verts;
+            m.WorldVerticesLength = worldVerticesLength;
+            // Copy() inherits the source's TimelineAttachment, which would link our custom topology to
+            // the original's deform timelines and explode it. Point it at itself so none match.
+            m.TimelineAttachment = m;
+            m.UpdateRegion();
+            return m;
+        }
+
         private AtlasPage GetOrCreateModPage(AtlasPage origPage, Texture editedTex)
         {
             string key = origPage.name + "#" + editedTex.GetInstanceID();

@@ -11,6 +11,44 @@ Requires [TCModLoader](https://github.com/hashxl/ModLoaderNN).
 
 ---
 
+## Two kinds of outfit
+
+**Reskin** — repaint an existing skin's art (same geometry). The simplest path; documented below.
+
+**Custom mesh** — inject your *own* drawn meshes, not just a recolor. This is fully **data-driven**:
+no per-outfit code. You build a package with the companion **TCNN Mesh Editor** (draw parts →
+auto-fit donor mesh → dilate / drag vertices → preview the idle deform → export), drop the folder
+into `assets/`, and the mod loads it automatically. A package is:
+
+```
+assets/<id>/
+├── <page>.png       ← packed art page (name is whatever single.json's "page" says)
+├── single.json      ← meshes: weighted geometry + page UVs
+├── hide.json        ← body slots to hide under the outfit   (optional)
+├── outfit.json      ← { "id", "name", "base", "cloneBase"?, "icon"?, "description"? }
+└── icon.png         ← inventory icon
+```
+
+Everything under `assets/` with a `single.json` is auto-registered at boot. In the console:
+
+```
+outfit.meshes            → list registered custom-mesh outfits
+outfit.wear <id>         → register + build + give + equip that outfit
+```
+
+From another mod, register your own package (id comes from its `outfit.json`):
+
+```csharp
+OutfitApi.RegisterMeshOutfit(Path.Combine(manifest.ModPath, "assets", "my_outfit"));
+OutfitApi.WearMeshOutfit("my_outfit");   // or hand it out however you like
+```
+
+The bundled `assets/racer/` (the "Neon Racer" bodysuit) is a ready example — `outfit.wear racer`.
+See `Core/MeshOutfit.cs` for the generic loader. (Live skeletons are import-scale 0.01, so the
+exporter's raw bone-local coords are scaled at load.)
+
+---
+
 ## Install
 
 ```

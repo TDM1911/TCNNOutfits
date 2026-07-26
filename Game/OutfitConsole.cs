@@ -40,6 +40,8 @@ namespace TCNNOutfits.Game
                 ConCommand.Add("outfit.reload", CmdReload);
                 ConCommand.Add("outfit.created", CmdCreated);
                 ConCommand.Add("outfit.give", CmdGive);
+                ConCommand.Add("outfit.meshes", CmdMeshes);   // list registered custom-mesh outfits
+                ConCommand.Add("outfit.wear", CmdWear);       // wear a custom-mesh outfit by id
 
                 dict = ANToolkit.Debugging.Console.ConCommands;
                 bool present = dict != null && dict.ContainsKey("outfit.skins");
@@ -52,6 +54,21 @@ namespace TCNNOutfits.Game
             }
         }
 
+
+        private void CmdMeshes(List<string> args)
+        {
+            var ids = new List<string>(_framework.MeshOutfitIds);
+            Echo(ids.Count == 0 ? "No custom-mesh outfits found (drop a package folder in assets/)."
+                                : "Custom-mesh outfits: " + string.Join(", ", ids) + "  —  wear with 'outfit.wear <id>'");
+        }
+
+        private void CmdWear(List<string> args)
+        {
+            if (args == null || args.Count == 0) { Echo("usage: outfit.wear <id>   (list ids with 'outfit.meshes')"); return; }
+            string id = args[0].Trim();
+            try { Echo(_framework.WearMeshOutfit(id) ? $"Wearing '{id}' (if a character is on screen)." : $"No mesh outfit '{id}'."); }
+            catch (Exception e) { Echo("Wear failed: " + e.Message); _log.LogError(e.ToString()); }
+        }
 
         private void Echo(string msg)
         {

@@ -29,6 +29,7 @@ namespace TCNNOutfits.Core
 
         private GameIntegration _game;
         private OutfitConsole _console;
+        private readonly Dictionary<string, MeshOutfit> _meshOutfits = new Dictionary<string, MeshOutfit>();
 
         private readonly Dictionary<string, Asuna.Items.Equipment> _created = new Dictionary<string, Asuna.Items.Equipment>();
         public static event Action<string, Asuna.Items.Equipment> OnOutfitCreated;
@@ -49,6 +50,7 @@ namespace TCNNOutfits.Core
             _console.TryRegister();
 
             _game = new GameIntegration(this, _log);
+            DiscoverMeshOutfits(Path.Combine(_baseDir, "assets"));   // auto-register bundled packages
             UnityEngine.SceneManagement.SceneManager.sceneLoaded += OnSceneLoaded;
 
             try
@@ -58,13 +60,45 @@ namespace TCNNOutfits.Core
             }
             catch (System.Exception e) { _log.LogError("Source loading failed: " + e); }
 
-            _log.LogInfo($"OutfitFramework booted. {_registry.Count} outfit(s) registered. " +
-                         "Console: outfit.skins, outfit.export, outfit.create, outfit.created, outfit.give.");
+            _log.LogInfo($"OutfitFramework booted. {_registry.Count} reskin outfit(s), {_meshOutfits.Count} mesh outfit(s). " +
+                         "Console: outfit.skins, outfit.export, outfit.create, outfit.created, outfit.give, outfit.meshes, outfit.wear.");
 
             OutfitApi.FlushReady();
         }
 
-        public void Tick() => _console?.TryRegister();
+        public void Tick()
+        {
+            _console?.TryRegister();
+            foreach (var mo in _meshOutfits.Values) mo.Tick();   // keep custom-mesh outfits injected
+        }
+
+        // --- custom-mesh outfits: data-driven, no per-outfit code. A package folder holds
+        // single.json + its page + hide.json + outfit.json (see MeshOutfit). ---
+        public IEnumerable<string> MeshOutfitIds => _meshOutfits.Keys;
+
+        public void DiscoverMeshOutfits(string dir)
+        {
+            if (!Directory.Exists(dir)) return;
+            foreach (var folder in Directory.GetDirectories(dir))
+                if (MeshOutfit.IsPackage(folder)) RegisterMeshOutfit(folder);
+        }
+
+        public MeshOutfit RegisterMeshOutfit(string folder)
+        {
+            if (string.IsNullOrEmpty(folder) || !MeshOutfit.IsPackage(folder))
+            { _log.LogWarning("Not a mesh-outfit package: " + folder); return null; }
+            var mo = new MeshOutfit(folder, _resolver, _game, this, _log);
+            _meshOutfits[mo.Id] = mo;
+            _log.LogInfo($"Registered mesh outfit '{mo.Id}' ({mo.Title}).");
+            return mo;
+        }
+
+        public bool WearMeshOutfit(string id)
+        {
+            if (id == null || !_meshOutfits.TryGetValue(id, out var mo)) { _log.LogWarning($"No mesh outfit '{id}'."); return false; }
+            mo.Setup();
+            return true;
+        }
 
         private void OnSceneLoaded(UnityEngine.SceneManagement.Scene scene, UnityEngine.SceneManagement.LoadSceneMode mode)
             => RetryPending();
