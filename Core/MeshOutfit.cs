@@ -22,6 +22,7 @@ namespace TCNNOutfits.Core
         {
             public string id; public string name; public string @base;
             public string cloneBase; public string icon; public string description;
+            public string[] slots;
         }
         private sealed class MeshRec
         {
@@ -63,7 +64,9 @@ namespace TCNNOutfits.Core
             _cloneBase = !string.IsNullOrEmpty(meta?.cloneBase) ? meta.cloneBase : "outfits/default/coat";
             _icon = !string.IsNullOrEmpty(meta?.icon) ? meta.icon : "icon.png";
             _desc = !string.IsNullOrEmpty(meta?.description) ? meta.description : "Custom outfit: " + Title;
+            _slots = meta?.slots;
         }
+        private readonly string[] _slots;
 
         public static bool IsPackage(string folder) => File.Exists(Path.Combine(folder, "single.json"));
 
@@ -75,7 +78,7 @@ namespace TCNNOutfits.Core
             // Clone a base outfit item so this occupies a real equip slot; the framework repoints its
             // DialogueSpineSkins to SkinName.
             var item = _framework.CreateOutfitItem(_cloneBase, Id, _dir,
-                new OutfitOptions { Title = Title, Description = _desc, Icon = _icon });
+                new OutfitOptions { Title = Title, Description = _desc, Icon = _icon, Slots = _slots });
             if (item == null)
             {
                 _log.LogWarning($"[{Id}] item registration failed — base '{_cloneBase}' not available yet. " +
@@ -113,7 +116,6 @@ namespace TCNNOutfits.Core
                 if (!force && _injected.Contains(data)) continue;
 
                 BuildSkinInto(data, skel, sg.material);
-                StripHidden(data);
                 sg.SetAllDirty();
                 _injected.Add(data);
                 touched++;
@@ -149,49 +151,65 @@ namespace TCNNOutfits.Core
                 foreach (var nm in names) skin.SetAttachment(m.slotIndex, nm, mesh);
                 n++;
             }
-            _log.LogInfo($"[{Id}] skin '{SkinName}' built with {n} mesh(es) on '{data.Name}'.");
-        }
 
-        // Strip the listed nude slots from the composed base skin so they don't show under the outfit.
-        private void StripHidden(SkeletonData data)
-        {
-            if (_hide == null || _hide.Count == 0) return;
-            var baseSkin = data.FindSkin(BaseSkinName()) ?? data.FindSkin("naked");
-            if (baseSkin == null) return;
-
-            var hideIdx = new HashSet<int>();
-            foreach (var sn in _hide) { var slot = data.FindSlot(sn); if (slot != null) hideIdx.Add(slot.Index); }
-            if (hideIdx.Count == 0) return;
-
-            foreach (var e in new List<Skin.SkinEntry>(baseSkin.Attachments))
-                if (hideIdx.Contains(e.SlotIndex)) baseSkin.RemoveAttachment(e.SlotIndex, e.Name);
-        }
-
-        // Deform timelines are authored for the original vertex layout and distort our custom topology,
-        // so clear deform on our slots after the animation applies but before mesh generation.
-        private void OnUpdateComplete(global::Spine.Unity.ISkeletonAnimation animated)
-        {
-            var skel = animated?.Skeleton;
-            if (skel == null || !Active) return;
-            foreach (var m in _pkg.meshes)
+            // Hide nude slots by putting a fully-transparent copy of their attachment(s) in OUR skin,
+            // under the same name(s) the base uses. Because it lives in the composed skin, the game's
+            // Populate re-applies it every time (dialogue included) — unlike a per-frame null that a
+            // static dialogue portrait would revert. Only composes while our outfit is worn, so it's
+            // reversible: switch outfits and the real nude parts come back.
+            var baseSkin = data.FindSkin("naked");
+            foreach (var sn in _hide ?? new List<string>())
             {
-                if (m.slotIndex < 0 || m.slotIndex >= skel.Slots.Count) continue;
-                var deform = skel.Slots.Items[m.slotIndex].Deform;
-                if (deform != null && deform.Count > 0) deform.Clear();
+                var slot = data.FindSlot(sn);
+                if (slot == null) continue;
+                int si = slot.Index;
+                var names = new HashSet<string>();
+                var setup = data.Slots.Items[si].AttachmentName;
+                if (!string.IsNullOrEmpty(setup)) names.Add(setup);
+                if (baseSkin != null)
+                    foreach (var e in baseSkin.Attachments)
+                        if (e.SlotIndex == si && e.Name != null) names.Add(e.Name);
+                foreach (var nm in names)
+                {
+                    var src2 = baseSkin?.GetAttachment(si, nm);
+                    if (src2 == null) continue;
+                    var clear = src2.Copy();
+                    if (clear is MeshAttachment cm) cm.A = 0f;
+                    else if (clear is RegionAttachment cr) cr.A = 0f;
+                    skin.SetAttachment(si, nm, clear);
+                }
             }
+            _log.LogInfo($"[{Id}] skin '{SkinName}' built with {n} mesh(es) + {(_hide?.Count ?? 0)} hidden on '{data.Name}'.");
         }
 
-        private static string BaseSkinName()
+        // Clear deform on our slots (see MakeMesh) — only while our outfit is composed, so we never
+        // touch another outfit's deform. try/catch so a bad frame can't break other mods.
+        private void OnUpdateComplete(global::Spine.Unity.ISkeletonAnimation animated)
         {
             try
             {
-                var p = Asuna.CharManagement.Character.Player;
-                var t = p?.GetType();
-                var v = (t?.GetProperty("SpineBaseSkin")?.GetValue(p) ?? t?.GetField("SpineBaseSkin")?.GetValue(p)) as string;
-                if (!string.IsNullOrEmpty(v)) return v;
+                var skel = animated?.Skeleton;
+                if (skel == null || !Active || _region == null || !IsWorn(skel)) return;
+                foreach (var m in _pkg.meshes)
+                {
+                    if (m.slotIndex < 0 || m.slotIndex >= skel.Slots.Count) continue;
+                    var d = skel.Slots.Items[m.slotIndex].Deform;
+                    if (d != null && d.Count > 0) d.Clear();
+                }
             }
             catch { }
-            return "naked";
+        }
+
+        // Our meshes only compose when this outfit is equipped, so their presence is a reliable
+        // "is it worn right now" signal.
+        private bool IsWorn(Skeleton skel)
+        {
+            foreach (var m in _pkg.meshes)
+            {
+                if (m.slotIndex < 0 || m.slotIndex >= skel.Slots.Count) continue;
+                if (skel.Slots.Items[m.slotIndex].Attachment is MeshAttachment att && att.Region == _region) return true;
+            }
+            return false;
         }
 
         private bool Load()

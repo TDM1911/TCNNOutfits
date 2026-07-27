@@ -1,1 +1,14 @@
-{"id": "racer", "name": "Neon Racer", "skeleton": "PortraitZoey", "base": "naked"}
+{
+"id": "racer",
+"name": "Neon Racer",
+"skeleton": "PortraitZoey",
+"base": "naked",
+"slots": [
+"Bra",
+"Underwear",
+"Shirt",
+"Pants",
+"Jacket",
+"Shoes"
+]
+}

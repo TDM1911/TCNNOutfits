@@ -25,7 +25,7 @@ assets/<id>/
 ├── <page>.png       ← packed art page (name is whatever single.json's "page" says)
 ├── single.json      ← meshes: weighted geometry + page UVs
 ├── hide.json        ← body slots to hide under the outfit   (optional)
-├── outfit.json      ← { "id", "name", "base", "cloneBase"?, "icon"?, "description"? }
+├── outfit.json      ← { "id", "name", "base", "cloneBase"?, "icon"?, "description"?, "slots"? }
 └── icon.png         ← inventory icon
 ```
 
@@ -42,6 +42,12 @@ From another mod, register your own package (id comes from its `outfit.json`):
 OutfitApi.RegisterMeshOutfit(Path.Combine(manifest.ModPath, "assets", "my_outfit"));
 OutfitApi.WearMeshOutfit("my_outfit");   // or hand it out however you like
 ```
+
+`"slots"` lists the equipment slots the outfit occupies (`EquipmentSlot` names: `Head, Bra,
+Underwear, Shirt, Pants, Jacket, MainHand, Offhand, Accessory1, Accessory2, Shoes, NipplePiercing,
+Necklace, Tattoo, Gloves, NeckChip`). Occupying a slot displaces whatever's in it, so a full-body
+outfit like `["Bra","Underwear","Shirt","Pants","Jacket","Shoes"]` blocks tops/bottoms/coats from
+coexisting and clashing with it. Omit to keep the cloned base item's slots.
 
 The bundled `assets/racer/` (the "Neon Racer" bodysuit) is a ready example — `outfit.wear racer`.
 See `Core/MeshOutfit.cs` for the generic loader. (Live skeletons are import-scale 0.01, so the

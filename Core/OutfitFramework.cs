@@ -310,6 +310,17 @@ namespace TCNNOutfits.Core
             clone.DialogueSpineSkins = new List<string> { newSkinName };
             clone.OverworldSpineSkins = new List<string> { newSkinName };
 
+            // Equipment slots this outfit occupies. Occupying a slot displaces whatever's in it, so a
+            // full-body outfit blocks conflicting items. Unrecognised names are skipped.
+            if (rec.Options?.Slots != null && rec.Options.Slots.Length > 0)
+            {
+                var slots = new List<Asuna.Items.EquipmentSlot>();
+                foreach (var s in rec.Options.Slots)
+                    if (System.Enum.TryParse<Asuna.Items.EquipmentSlot>(s, true, out var es)) slots.Add(es);
+                    else _log.LogWarning($"[{rec.Id}] unknown equipment slot '{s}'.");
+                if (slots.Count > 0) clone.Slots = slots;
+            }
+
             var icon = LoadIcon(rec.Options?.Icon, AssetFolderFor(rec));
             if (icon != null) clone.DisplaySprite = icon;
 
