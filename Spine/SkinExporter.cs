@@ -97,6 +97,20 @@ namespace TCNNOutfits.Spine
             catch (System.Exception e) { _log.LogError("Sprite export failed: " + e.Message); return false; }
         }
 
+        // Write any atlas page texture (usually non-readable) to a PNG. Used by the skeleton dumper.
+        public bool ExportTexture(Texture2D tex, string path)
+        {
+            if (tex == null) return false;
+            try
+            {
+                var readable = Readback(tex);
+                File.WriteAllBytes(path, readable.EncodeToPNG());
+                Object.Destroy(readable);
+                return true;
+            }
+            catch (System.Exception e) { _log.LogError($"Page export failed for '{path}': {e.Message}"); return false; }
+        }
+
         private static Texture2D Readback(Texture2D src)
         {
             var rt = RenderTexture.GetTemporary(src.width, src.height, 0, RenderTextureFormat.ARGB32);

@@ -10,9 +10,13 @@ using TCNNOutfits.Spine;
 
 namespace TCNNOutfits.Core
 {
-    // Data-driven custom-mesh outfit loaded from a package folder (single.json + page + hide.json +
-    // outfit.json). Injects the meshes into a named skin "tcnn/<id>" the game composes from, and
-    // registers a real equippable item. No per-outfit code.
+    // Data-driven custom-mesh outfit loaded from a package folder. Injects meshes into a named skin
+    // "tcnn/<id>" the game composes from, and registers a real equippable item. No per-outfit code.
+    //
+    // A package holds outfit.json + icon.png at the root, then one subfolder per surface (skeleton),
+    // each with single.json + its page + hide.json — e.g. portrait/ and overworld/. Whichever surface's
+    // meshes resolve on a given live skeleton is the one that injects there. A flat package (single.json
+    // at the root, single surface) is still accepted.
     public sealed class MeshOutfit
     {
         // Live skeletons run at import scale 0.01, so the exporter's raw bone-local coords are 100x too big.
@@ -32,25 +36,33 @@ namespace TCNNOutfits.Core
         }
         private sealed class Pkg { public string page; public int pageW; public int pageH; public List<MeshRec> meshes; }
 
+        // One drawable surface (a skeleton's worth of meshes + its own page/region + hide list).
+        private sealed class Surface
+        {
+            public string Dir;
+            public Pkg Pkg;
+            public List<string> Hide;
+            public Texture2D PageTex;
+            public AtlasRegion Region;
+        }
+
         public string Id { get; }
         public string Title { get; }
         public bool Active { get; private set; }
         private string SkinName => "tcnn/" + Id;
 
         private readonly string _dir, _cloneBase, _icon, _desc;
+        private readonly string[] _slots;
         private readonly SkinResolver _resolver;
         private readonly GameIntegration _game;
         private readonly OutfitFramework _framework;
         private readonly ManualLogSource _log;
 
-        private Pkg _pkg;
-        private List<string> _hide;
-        private Texture2D _pageTex;
-        private AtlasRegion _region;
+        private readonly List<Surface> _surfaces = new List<Surface>();
         private bool _itemGiven;
 
         private readonly HashSet<SkeletonData> _injected = new HashSet<SkeletonData>();
-        private readonly HashSet<SkeletonGraphic> _hooked = new HashSet<SkeletonGraphic>();
+        private readonly HashSet<global::Spine.Unity.ISkeletonAnimation> _hooked = new HashSet<global::Spine.Unity.ISkeletonAnimation>();
 
         public MeshOutfit(string folder, SkinResolver resolver, GameIntegration game, OutfitFramework framework, ManualLogSource log)
         {
@@ -66,9 +78,16 @@ namespace TCNNOutfits.Core
             _desc = !string.IsNullOrEmpty(meta?.description) ? meta.description : "Custom outfit: " + Title;
             _slots = meta?.slots;
         }
-        private readonly string[] _slots;
 
-        public static bool IsPackage(string folder) => File.Exists(Path.Combine(folder, "single.json"));
+        // A package is a folder with single.json at its root (flat) or in any immediate subfolder (surfaces).
+        public static bool IsPackage(string folder)
+        {
+            if (File.Exists(Path.Combine(folder, "single.json"))) return true;
+            if (!Directory.Exists(folder)) return false;
+            foreach (var sub in Directory.GetDirectories(folder))
+                if (File.Exists(Path.Combine(sub, "single.json"))) return true;
+            return false;
+        }
 
         // Register + build + give + equip. Idempotent.
         public void Setup()
@@ -103,62 +122,114 @@ namespace TCNNOutfits.Core
 
         public int EnsureSkins(bool force)
         {
-            if (_pkg == null) return 0;
+            if (_surfaces.Count == 0) return 0;
             int touched = 0;
-            foreach (var kv in _game.GetLiveGraphics())
+            bool overworldTouched = false;
+            foreach (var ls in _game.GetLiveSkeletons())
             {
-                var sg = kv.Value; var skel = sg?.Skeleton; var data = skel?.Data;
+                var data = ls.Data;
                 if (data == null) continue;
 
-                if (_hooked.Add(sg)) sg.UpdateComplete += OnUpdateComplete;
-                sg.allowMultipleCanvasRenderers = true;   // our page is a 2nd texture
+                if (ls.Animated != null && _hooked.Add(ls.Animated)) ls.Animated.UpdateComplete += OnUpdateComplete;
+                if (ls.Graphic != null) ls.Graphic.allowMultipleCanvasRenderers = true;   // UI page is a 2nd texture
 
                 if (!force && _injected.Contains(data)) continue;
 
-                BuildSkinInto(data, skel, sg.material);
-                sg.SetAllDirty();
+                BuildSkinInto(data, ls.Skeleton, ls.Material);
+                ls.MarkDirty?.Invoke();
+                if (ls.Graphic == null) overworldTouched = true;   // MeshRenderer chibi must re-compose its skin
                 _injected.Add(data);
                 touched++;
             }
+            if (overworldTouched) _game.RefreshLiveOverworld();
             return touched;
         }
 
-        private void BuildSkinInto(SkeletonData data, Skeleton skel, Material template)
+        private void BuildSkinInto(SkeletonData data, Skeleton skel, Material preferred)
         {
-            if (_region == null) _region = _resolver.MakeFullPageRegion(template, PageTex(), _pkg.pageW, _pkg.pageH);
-
-            var skin = data.FindSkin(SkinName);
-            if (skin == null) { skin = new Skin(SkinName); data.Skins.Add(skin); }
-            else skin.Clear();
-
-            int n = 0;
-            foreach (var m in _pkg.meshes)
+            // Stage into a temp skin; only overwrite the live one if something actually matched. A
+            // wrong/stale skeleton (indices from another version) must leave the skin untouched, never
+            // strip it down to a nude body.
+            var built = new Skin(SkinName);
+            int total = 0;
+            foreach (var s in _surfaces)
             {
-                var src = data.FindSkin(m.skin)?.GetAttachment(m.slotIndex, m.name);
-                if (src == null) { _log.LogWarning($"[{Id}] source {m.skin}/{m.name} not found on '{data.Name}'"); continue; }
+                int matched = 0;
+                foreach (var m in s.Pkg.meshes)
+                {
+                    var src = data.FindSkin(m.skin)?.GetAttachment(m.slotIndex, m.name);
+                    if (src == null) continue;   // this surface's mesh doesn't exist on this skeleton
 
-                var mesh = _resolver.MakeMesh(src, _region, m.regionUVs, m.bones, m.vertices, m.worldVerticesLength, m.triangles);
-                if (mesh == null) continue;
+                    // Build the surface region lazily from THIS skeleton's own atlas material, so the page
+                    // carries the right shader for whichever renderer it is (UI portrait vs MeshRenderer chibi).
+                    if (s.Region == null)
+                    {
+                        var template = preferred ?? ((src as IHasTextureRegion)?.Region as AtlasRegion)?.page?.rendererObject as Material;
+                        if (template == null) { _log.LogWarning($"[{Id}] no atlas material from {m.skin}/{m.name} on '{data.Name}'."); continue; }
+                        s.Region = _resolver.MakeFullPageRegion(template, PageTex(s), s.Pkg.pageW, s.Pkg.pageH);
+                    }
 
-                // Register under every name the game might select for this slot (setup name, the live
-                // name, our source name) so SetSlotsToSetupPose lands on our mesh whichever it picks.
-                var slotData = data.Slots.Items[m.slotIndex];
-                var names = new HashSet<string>();
-                if (!string.IsNullOrEmpty(slotData.AttachmentName)) names.Add(slotData.AttachmentName);
-                var live = skel.Slots.Items[m.slotIndex].Attachment;
-                if (live != null) names.Add(live.Name);
-                names.Add(m.name);
-                foreach (var nm in names) skin.SetAttachment(m.slotIndex, nm, mesh);
-                n++;
+                    var mesh = _resolver.MakeMesh(src, s.Region, m.regionUVs, m.bones, m.vertices, m.worldVerticesLength, m.triangles);
+                    if (mesh == null) continue;
+
+                    // Register under every name the game might select for this slot (setup name, the live
+                    // name, our source name) so SetSlotsToSetupPose lands on our mesh whichever it picks.
+                    var slotData = data.Slots.Items[m.slotIndex];
+                    var names = new HashSet<string>();
+                    if (!string.IsNullOrEmpty(slotData.AttachmentName)) names.Add(slotData.AttachmentName);
+                    var live = skel?.Slots.Items[m.slotIndex].Attachment;
+                    if (live != null) names.Add(live.Name);
+                    names.Add(m.name);
+                    foreach (var nm in names) built.SetAttachment(m.slotIndex, nm, mesh);
+                    matched++;
+                }
+
+                if (matched == 0)   // wrong skeleton for this surface — skip its hide too
+                {
+                    if (s.Pkg.meshes.Count > 0) DiagnoseNoMatch(data, s);
+                    continue;
+                }
+                total += matched;
+                ApplyHide(data, built, s.Hide);
             }
 
-            // Hide nude slots by putting a fully-transparent copy of their attachment(s) in OUR skin,
-            // under the same name(s) the base uses. Because it lives in the composed skin, the game's
-            // Populate re-applies it every time (dialogue included) — unlike a per-frame null that a
-            // static dialogue portrait would revert. Only composes while our outfit is worn, so it's
-            // reversible: switch outfits and the real nude parts come back.
+            if (total == 0)   // nothing for this skeleton — don't touch its skin
+            {
+                _log.LogInfo($"[{Id}] no matching meshes on '{data.Name}' — skin left as-is.");
+                return;
+            }
+
+            var skin = data.FindSkin(SkinName);
+            if (skin == null) { data.Skins.Add(built); }
+            else { skin.Clear(); foreach (var e in built.Attachments) skin.SetAttachment(e.SlotIndex, e.Name, e.Attachment); }
+            _log.LogInfo($"[{Id}] skin '{SkinName}' built with {total} mesh(es) on '{data.Name}'.");
+        }
+
+        // Why did none of a surface's meshes resolve on this skeleton? Log enough to tell whether it's
+        // the wrong skeleton (expected — a surface only matches its own) or a real name/index mismatch.
+        private void DiagnoseNoMatch(SkeletonData data, Surface s)
+        {
+            _log.LogWarning($"[{Id}] surface '{Path.GetFileName(s.Dir)}' matched 0 on '{data.Name}' (live slots={data.Slots.Count}). " +
+                            "Likely the package was exported against a different skeleton version — re-dump and re-export.");
+            int shown = 0;
+            foreach (var m in s.Pkg.meshes)
+            {
+                if (shown++ >= 3) break;
+                if (data.FindSkin(m.skin) == null) { _log.LogWarning($"    want {m.skin}/{m.name}@{m.slotIndex}: that skin isn't on this skeleton"); continue; }
+                if (m.slotIndex >= data.Slots.Count) { _log.LogWarning($"    want {m.skin}/{m.name}@{m.slotIndex}: slot past end (max {data.Slots.Count - 1})"); continue; }
+                _log.LogWarning($"    want {m.skin}/{m.name}@{m.slotIndex}: but live slot {m.slotIndex} is '{data.Slots.Items[m.slotIndex].Name}'");
+            }
+        }
+
+        // Hide nude slots by putting a fully-transparent copy of their attachment(s) in OUR skin, under
+        // the same name(s) the base uses. Because it lives in the composed skin, the game's Populate
+        // re-applies it every time (dialogue included) — unlike a per-frame null that a static dialogue
+        // portrait would revert. Only composes while our outfit is worn, so switching outfits brings the
+        // real nude parts back.
+        private void ApplyHide(SkeletonData data, Skin skin, List<string> hide)
+        {
             var baseSkin = data.FindSkin("naked");
-            foreach (var sn in _hide ?? new List<string>())
+            foreach (var sn in hide ?? new List<string>())
             {
                 var slot = data.FindSlot(sn);
                 if (slot == null) continue;
@@ -179,64 +250,72 @@ namespace TCNNOutfits.Core
                     skin.SetAttachment(si, nm, clear);
                 }
             }
-            _log.LogInfo($"[{Id}] skin '{SkinName}' built with {n} mesh(es) + {(_hide?.Count ?? 0)} hidden on '{data.Name}'.");
         }
 
-        // Clear deform on our slots (see MakeMesh) — only while our outfit is composed, so we never
-        // touch another outfit's deform. try/catch so a bad frame can't break other mods.
+        // Clear deform on any slot currently showing one of our meshes (see MakeMesh). Region-gated so we
+        // only touch slots that hold our art — never another outfit's. try/catch so a bad frame can't
+        // break other mods.
         private void OnUpdateComplete(global::Spine.Unity.ISkeletonAnimation animated)
         {
             try
             {
                 var skel = animated?.Skeleton;
-                if (skel == null || !Active || _region == null || !IsWorn(skel)) return;
-                foreach (var m in _pkg.meshes)
+                if (skel == null || !Active) return;
+                for (int si = 0; si < skel.Slots.Count; si++)
                 {
-                    if (m.slotIndex < 0 || m.slotIndex >= skel.Slots.Count) continue;
-                    var d = skel.Slots.Items[m.slotIndex].Deform;
+                    var slot = skel.Slots.Items[si];
+                    if (!(slot.Attachment is MeshAttachment att) || !IsOurs(att)) continue;
+                    var d = slot.Deform;
                     if (d != null && d.Count > 0) d.Clear();
                 }
             }
             catch { }
         }
 
-        // Our meshes only compose when this outfit is equipped, so their presence is a reliable
-        // "is it worn right now" signal.
-        private bool IsWorn(Skeleton skel)
+        private bool IsOurs(MeshAttachment att)
         {
-            foreach (var m in _pkg.meshes)
-            {
-                if (m.slotIndex < 0 || m.slotIndex >= skel.Slots.Count) continue;
-                if (skel.Slots.Items[m.slotIndex].Attachment is MeshAttachment att && att.Region == _region) return true;
-            }
+            foreach (var s in _surfaces)
+                if (s.Region != null && att.Region == s.Region) return true;
             return false;
         }
 
         private bool Load()
         {
-            if (_pkg != null) return true;
+            if (_surfaces.Count > 0) return true;
             if (!Directory.Exists(_dir)) return false;
-            _pkg = JsonConvert.DeserializeObject<Pkg>(File.ReadAllText(Path.Combine(_dir, "single.json")));
-            var hp = Path.Combine(_dir, "hide.json");
-            _hide = File.Exists(hp) ? JsonConvert.DeserializeObject<List<string>>(File.ReadAllText(hp)) : new List<string>();
 
-            foreach (var m in _pkg.meshes)   // [localX, localY, weight] per influence — scale the coords only
+            var dirs = new List<string>();
+            if (File.Exists(Path.Combine(_dir, "single.json"))) dirs.Add(_dir);   // flat (single surface)
+            else foreach (var sub in Directory.GetDirectories(_dir))              // one subfolder per surface
+                if (File.Exists(Path.Combine(sub, "single.json"))) dirs.Add(sub);
+
+            foreach (var d in dirs)
             {
-                var v = m.vertices;
-                if (v == null) continue;
-                for (int i = 0; i + 2 < v.Length; i += 3) { v[i] *= BoneLocalScale; v[i + 1] *= BoneLocalScale; }
+                var pkg = JsonConvert.DeserializeObject<Pkg>(File.ReadAllText(Path.Combine(d, "single.json")));
+                var hp = Path.Combine(d, "hide.json");
+                var hide = File.Exists(hp) ? JsonConvert.DeserializeObject<List<string>>(File.ReadAllText(hp)) : new List<string>();
+
+                foreach (var m in pkg.meshes)   // [localX, localY, weight] per influence — scale the coords only
+                {
+                    var v = m.vertices;
+                    if (v == null) continue;
+                    for (int i = 0; i + 2 < v.Length; i += 3) { v[i] *= BoneLocalScale; v[i + 1] *= BoneLocalScale; }
+                }
+
+                _surfaces.Add(new Surface { Dir = d, Pkg = pkg, Hide = hide });
+                _log.LogInfo($"[{Id}] surface '{Path.GetFileName(d)}': {pkg.meshes.Count} meshes, " +
+                             $"page {pkg.pageW}x{pkg.pageH}, {hide.Count} hidden.");
             }
-            _log.LogInfo($"[{Id}] {_pkg.meshes.Count} meshes, page {_pkg.pageW}x{_pkg.pageH}, {_hide.Count} hidden.");
-            return true;
+            return _surfaces.Count > 0;
         }
 
-        private Texture2D PageTex()
+        private Texture2D PageTex(Surface s)
         {
-            if (_pageTex != null) return _pageTex;
+            if (s.PageTex != null) return s.PageTex;
             var tex = new Texture2D(2, 2, TextureFormat.RGBA32, false, false);
-            ImageConversion.LoadImage(tex, File.ReadAllBytes(Path.Combine(_dir, _pkg.page)));
+            ImageConversion.LoadImage(tex, File.ReadAllBytes(Path.Combine(s.Dir, s.Pkg.page)));
             tex.wrapMode = TextureWrapMode.Clamp; tex.Apply(false, false);
-            _pageTex = tex;
+            s.PageTex = tex;
             return tex;
         }
     }

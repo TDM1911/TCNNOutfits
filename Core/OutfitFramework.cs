@@ -93,6 +93,29 @@ namespace TCNNOutfits.Core
             return mo;
         }
 
+        // Dump every live skeleton (portrait + overworld) into the mesh editor's folder format, straight
+        // from the running game — so the editor works against the exact skeleton the game loads.
+        public List<string> DumpSkeletons()
+        {
+            var dumper = new global::TCNNOutfits.Spine.SkeletonDumper(_log, _exporter);
+            string root = Path.Combine(_baseDir, "dumps");
+
+            var scaleByName = new Dictionary<string, float>();
+            var player = Asuna.CharManagement.Character.Player;
+            if (player?.SpineSkeleton != null) scaleByName[player.SpineSkeleton.name] = player.SpineSkeleton.scale;
+            if (player?.OverworldSpineSkeleton != null) scaleByName[player.OverworldSpineSkeleton.name] = player.OverworldSpineSkeleton.scale;
+
+            var done = new List<string>();
+            foreach (var kv in GetSkeletonSources())
+            {
+                var dir = Path.Combine(root, SkinExporter.Sanitize(kv.Key));
+                float scale = scaleByName.TryGetValue(kv.Key, out var s) && s > 1e-6f ? s : 0.01f;
+                try { if (dumper.Dump(kv.Value, dir, scale) != null) done.Add(dir); }
+                catch (Exception e) { _log.LogError($"Dump '{kv.Key}' failed: " + e); }
+            }
+            return done;
+        }
+
         public bool WearMeshOutfit(string id)
         {
             if (id == null || !_meshOutfits.TryGetValue(id, out var mo)) { _log.LogWarning($"No mesh outfit '{id}'."); return false; }

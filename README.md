@@ -18,18 +18,30 @@ Requires [TCModLoader](https://github.com/hashxl/ModLoaderNN).
 **Custom mesh** — inject your *own* drawn meshes, not just a recolor. This is fully **data-driven**:
 no per-outfit code. You build a package with the companion **TCNN Mesh Editor** (draw parts →
 auto-fit donor mesh → dilate / drag vertices → preview the idle deform → export), drop the folder
-into `assets/`, and the mod loads it automatically. A package is:
+into `assets/`, and the mod loads it automatically. A package is one folder per outfit, with
+**one subfolder per surface** (skeleton) — e.g. `portrait/` and `overworld/`:
 
 ```
 assets/<id>/
-├── <page>.png       ← packed art page (name is whatever single.json's "page" says)
-├── single.json      ← meshes: weighted geometry + page UVs
-├── hide.json        ← body slots to hide under the outfit   (optional)
-├── outfit.json      ← { "id", "name", "base", "cloneBase"?, "icon"?, "description"?, "slots"? }
-└── icon.png         ← inventory icon
+├── outfit.json          ← { "id", "name", "base", "cloneBase"?, "icon"?, "description"?, "slots"? }
+├── icon.png             ← inventory icon
+├── portrait/            ← one surface = one skeleton's worth of art
+│   ├── <page>.png       ← packed art page (name is whatever single.json's "page" says)
+│   ├── single.json      ← meshes: weighted geometry + page UVs
+│   └── hide.json        ← body slots to hide under the outfit   (optional)
+└── overworld/           ← the chibi/overworld surface (same shape, its own page)
+    ├── <page>.png
+    ├── single.json
+    └── hide.json
 ```
 
-Everything under `assets/` with a `single.json` is auto-registered at boot. In the console:
+The mod injects whichever surface's meshes resolve on a given live skeleton, so one outfit covers
+the portrait **and** the overworld chibi. Subfolder names are free — matching is by geometry, not
+name. A flat package (`single.json` at the outfit root, single surface) is still accepted, but don't
+mix the two: a root `single.json` shadows any subfolders.
+
+Everything under `assets/` that is a package (a `single.json` at its root, or in a subfolder) is
+auto-registered at boot. In the console:
 
 ```
 outfit.meshes            → list registered custom-mesh outfits

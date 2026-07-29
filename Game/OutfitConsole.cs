@@ -42,6 +42,7 @@ namespace TCNNOutfits.Game
                 ConCommand.Add("outfit.give", CmdGive);
                 ConCommand.Add("outfit.meshes", CmdMeshes);   // list registered custom-mesh outfits
                 ConCommand.Add("outfit.wear", CmdWear);       // wear a custom-mesh outfit by id
+                ConCommand.Add("outfit.dumpskel", CmdDumpSkel);  // dump live skeleton(s) for the mesh editor
 
                 dict = ANToolkit.Debugging.Console.ConCommands;
                 bool present = dict != null && dict.ContainsKey("outfit.skins");
@@ -68,6 +69,18 @@ namespace TCNNOutfits.Game
             string id = args[0].Trim();
             try { Echo(_framework.WearMeshOutfit(id) ? $"Wearing '{id}' (if a character is on screen)." : $"No mesh outfit '{id}'."); }
             catch (Exception e) { Echo("Wear failed: " + e.Message); _log.LogError(e.ToString()); }
+        }
+
+        private void CmdDumpSkel(List<string> args)
+        {
+            try
+            {
+                var dirs = _framework.DumpSkeletons();
+                if (dirs.Count == 0) { Echo("Dump found no live skeletons — open a dialogue / be on the overworld first."); return; }
+                Echo($"Dumped {dirs.Count} skeleton(s) for the mesh editor:");
+                foreach (var d in dirs) Echo("   " + d);
+            }
+            catch (Exception e) { Echo("Dump failed: " + e.Message); _log.LogError(e.ToString()); }
         }
 
         private void Echo(string msg)
